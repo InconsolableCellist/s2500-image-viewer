@@ -1,6 +1,12 @@
 #ifndef S2500_IMAGE_VIEWER_SEM_CAPTURE_INFO_H
 #define S2500_IMAGE_VIEWER_SEM_CAPTURE_INFO_H
 
+enum CaptureStatus {
+    STATUS_RUNNING,
+    STATUS_PAUSED,
+    STATUS_ERROR,
+};
+
 struct SEMCapture {
     uint16_t *dataBuffer;
     const uint16_t BUF_SIZE_SAMPLES = 1024;
@@ -17,6 +23,7 @@ struct SEMCapture {
     uint32_t syncNum = 0;
     uint32_t bytesRead = 0;
     uint8_t newFrame = 0;
+    CaptureStatus status;
 };
 
 #endif //S2500_IMAGE_VIEWER_SEM_CAPTURE_INFO_H

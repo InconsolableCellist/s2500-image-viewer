@@ -96,14 +96,17 @@ int main(int argc, char *argv[]) {
         }
 
         bytesRead = read(capture.datafile, capture.dataBuffer, capture.BUF_SIZEOF_BYTES);
-        totalBytesRead += bytesRead;
+        capture.bytesRead += bytesRead;
         if (bytesRead <= 0) {
+            capture.status = CaptureStatus::STATUS_PAUSED;
 //            printf("End of data or error. Status: %d. Total read: %d. Errno: %d\n",
 //                bytesRead, totalBytesRead, errno);
 //            printf("Press any key to exit...\n");
 //            getchar();
 //            shouldQuit = true;
             // TODO: non-fatal, GUI handling of dead stream
+        } else {
+            capture.status = CaptureStatus::STATUS_RUNNING;
         }
 
         ParseSEMCaptureData(&capture, &capturePixels, bytesRead);
@@ -126,27 +129,38 @@ int main(int argc, char *argv[]) {
                 ImVec2(static_cast<float>(controls_width), static_cast<float>(sdl_height - 20)),
                 ImGuiCond_Always);
 
-            ImGui::Begin("Status", NULL, ImGuiWindowFlags_NoResize);
-                ImGui::Dummy(ImVec2(0.0f, 1.0f));
-                ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), "Last Row");
-                ImGui::Text("Scan mode:");
-                ImGui::Text("Pulse(s):");
-                ImGui::Text("Row(s):");
-                ImGui::Text("FPS avg: %.2f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate,
-                    ImGui::GetIO().Framerate);
-            ImGui::End();
-
-            ImGui::Begin("Firmware", NULL, ImGuiWindowFlags_NoResize);
+            ImGui::Begin("Controls");
+            if (ImGui::TreeNode("Firmware")) {
                 if (ImGui::Button("Scan Rapid")) { printf("Counter button clicked.\n"); }
                 if (ImGui::Button("Scan Half")) { printf("Counter button clicked.\n"); }
                 if (ImGui::Button("Scan 3/4")) { printf("Counter button clicked.\n"); }
                 if (ImGui::Button("Scan Photo")) { printf("Counter button clicked.\n"); }
-            ImGui::End();
-
-            ImGui::Begin("Capture", NULL, ImGuiWindowFlags_NoResize);
+                ImGui::TreePop();
+            }
+            if (ImGui::TreeNode("Capture")) {
                 if (ImGui::Button("Save next frame")) { printf("Counter button clicked.\n"); }
                 if (ImGui::Button("Begin stacked capture")) { printf("Counter button clicked.\n"); }
                 if (ImGui::Button("End stacked capture")) { printf("Counter button clicked.\n"); }
+                ImGui::TreePop();
+            }
+            ImGui::End();
+
+            ImGui::Begin("Status", NULL, ImGuiWindowFlags_AlwaysAutoResize);
+            ImGui::Indent();
+            ImGui::Dummy(ImVec2(0.0f, 1.0f));
+            ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), "Last Row");
+            ImGui::Text(capture.status == CaptureStatus::STATUS_RUNNING ? "Status:\t\tRunning": "Status:\t\tPaused");
+            ImGui::Text("Device:\t\t%s", DATA_FILE);
+            ImGui::Text("Scan mode:\t\t%d", capture.scanMode);
+            ImGui::Text("Pulse Time (s): %f", capture.syncDuration);
+            ImGui::Text("Row Time(s):\t%f", capture.frameDuration);
+            ImGui::Text("MB captured:\t%f", capture.bytesRead/1e6);
+            ImGui::Dummy(ImVec2(0.0f, 1.0f));
+            ImGui::Dummy(ImVec2(0.0f, 1.0f));
+            ImGui::Text("FPS avg: %.2f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate,
+                        ImGui::GetIO().Framerate);
+            ImGui::Dummy(ImVec2(0.0f, 1.0f));
+            ImGui::Unindent();
             ImGui::End();
 
             ImGui::Begin("Live output", NULL, ImGuiWindowFlags_AlwaysAutoResize);
