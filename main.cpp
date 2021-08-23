@@ -15,8 +15,8 @@
 
 #define MAX_ADC_VAL 8192
 
-const char *DATA_FILE = "../data.dat";
-//const char *DATA_FILE = "/dev/ttyACM1";
+//const char *DATA_FILE = "../data.dat";
+const char *DATA_FILE = "/dev/ttyACM1";
 
 int windowWidth = 1030;
 int windowHeight = 1265;
@@ -81,7 +81,7 @@ int main(int argc, char *argv[]) {
     ImGui::StyleColorsDark();
 
     ImGui_ImplSDL2_InitForOpenGL(window, glContext);
-    ImGui_ImplOpenGL3_Init("#version 150");
+    ImGui_ImplOpenGL3_Init("#version 130");
 
     ImVec4 background = ImVec4(35/255.0f, 35/255.0f, 35/255.0f, 1.00f);
 
@@ -337,6 +337,8 @@ void ParseSEMCaptureData(SEMCapture *ci, SEMCapturePixels *p, int bytesRead) {
 //            p->pixels[(((p->y * ci->sourceWidth) + (p->x) ) *3) + 2]    = val; // B
         } else {
             printf("x overflow at: %d\n", p->x);
+            p->x = 0;
+            p->y += 1;
         }
         p->x += 1;
     }
@@ -352,6 +354,7 @@ void ParseSEMCaptureData(SEMCapture *ci, SEMCapturePixels *p, int bytesRead) {
 void ParseStatusBytes(SEMCapture *ci, SEMCapturePixels *p, uint16_t &i) {
     uint16_t *buf = ci->dataBuffer;
     if (buf[i] == 0xFEFB) {
+//        printf("New frame\n");
         ci->newFrame = 1;
     }
     ci->syncDuration    = buf[++i];
