@@ -15,8 +15,8 @@
 
 #define MAX_ADC_VAL 8192
 
-//const char *DATA_FILE = "../data.dat";
-const char *DATA_FILE = "/dev/ttyACM1";
+const char *DATA_FILE = "../data.dat";
+//const char *DATA_FILE = "/dev/ttyACM1";
 
 int windowWidth = 1030;
 int windowHeight = 1265;
