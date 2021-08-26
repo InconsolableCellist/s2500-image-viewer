@@ -41,7 +41,7 @@ void Quit(SDL_Window *window, SDL_GLContext &glContext, uint8_t *pixels);
 void CreateWindow(SDL_WindowFlags &windowFlags, SDL_Window *&window, SDL_GLContext &glContext);
 bool InitSEMCapture(SEMCapture *ci, const char *dataFilePath, struct termios *termios);
 void DeleteSEMCapture(SEMCapture *ci);
-void ParseSEMCaptureData(SEMCapture *ci, SEMCapturePixels *p, int bytesRead);
+void ParseSEMCaptureData(SEMCapture *ci, SEMCapturePixels *p, ssize_t bytesRead);
 void ParseStatusBytes(SEMCapture *ci, SEMCapturePixels *p, uint16_t &i);
 
 void SendCommand(uint8_t command, const SEMCapture &capture);
@@ -53,7 +53,7 @@ int main(int argc, char *argv[]) {
     SDL_Texture *texture = NULL;
     SDL_GLContext glContext;
 
-    uint32_t bytesRead = 0;      // reset every time the buffer is read
+    ssize_t bytesRead = 0;      // reset every time the buffer is read
     uint32_t totalBytesRead = 0; // total
     uint8_t *outputBuffer = NULL;
 
@@ -118,8 +118,8 @@ int main(int argc, char *argv[]) {
         capture.bytesRead += bytesRead;
         if (bytesRead <= 0) {
             capture.status = CaptureStatus::STATUS_PAUSED;
-//            printf("End of data or error. Status: %d. Total read: %d. Errno: %d\n",
-//                bytesRead, totalBytesRead, errno);
+            printf("End of data or error. Status: %d. Total read: %d. Errno: %d\n",
+                bytesRead, totalBytesRead, errno);
 //            printf("Press any key to exit...\n");
 //            getchar();
 //            shouldQuit = true;
@@ -128,7 +128,9 @@ int main(int argc, char *argv[]) {
             capture.status = CaptureStatus::STATUS_RUNNING;
         }
 
-        ParseSEMCaptureData(&capture, &capturePixels, bytesRead);
+        if (capture.status == CaptureStatus::STATUS_RUNNING) {
+            ParseSEMCaptureData(&capture, &capturePixels, bytesRead);
+        }
 //        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, capture.sourceWidth, capture.sourceHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, capturePixels.pixels);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, capture.sourceWidth, capture.sourceHeight, GL_RGBA, GL_UNSIGNED_BYTE, capturePixels.pixels);
 
@@ -324,7 +326,7 @@ bool InitSEMCapture(SEMCapture *ci, const char *dataFilePath, struct termios *te
     ci->dataBuffer = static_cast<uint16_t *>(malloc(ci->BUF_SIZEOF_BYTES));
     memset(ci->dataBuffer, 0xFF, ci->BUF_SIZEOF_BYTES);
 
-    ci->datafile = open(dataFilePath, FILE_ACCESS_MODE);
+    ci->datafile = open(dataFilePath, FILE_ACCESS_MODE, O_NONBLOCK);
     if (ci->datafile == -1) {
         printf("Unable to open file %s!\n", dataFilePath);
         succ = false;
@@ -332,7 +334,7 @@ bool InitSEMCapture(SEMCapture *ci, const char *dataFilePath, struct termios *te
 
     tcgetattr(ci->datafile, termios);
     termios->c_lflag &= ~ICANON;
-    termios->c_cc[VTIME] = 50;
+    termios->c_cc[VTIME] = 10;
     tcsetattr(ci->datafile, TCSANOW, termios);
 
     return succ;
@@ -345,7 +347,7 @@ void DeleteSEMCapture(SEMCapture *ci) {
     }
 }
 
-void ParseSEMCaptureData(SEMCapture *ci, SEMCapturePixels *p, int bytesRead) {
+void ParseSEMCaptureData(SEMCapture *ci, SEMCapturePixels *p, ssize_t bytesRead) {
     uint16_t *buf = ci->dataBuffer;
     double pixelIntensity = 0;
     uint32_t val;
