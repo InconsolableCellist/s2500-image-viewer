@@ -12,11 +12,24 @@
 #include "sem_capture_info.h"
 #include "sem_capture_pixels.h"
 #include <sys/time.h>
+#include <termios.h>
 
 #define MAX_ADC_VAL 8192
 
-const char *DATA_FILE = "../data.dat";
-//const char *DATA_FILE = "/dev/ttyACM1";
+//const char *DATA_FILE = "../data.dat";
+//#define FILE_ACCESS_MODE O_RDONLY
+
+const char *DATA_FILE = "/dev/ttyACM1";
+#define FILE_ACCESS_MODE O_RDWR
+
+#define COMMAND_SCAN_RESTART        0xA0
+#define COMMAND_SCAN_RAPID          0xA1
+#define COMMAND_SCAN_HALF           0xA2
+#define COMMAND_SCAN_HALF_SLOWER    0xA4
+#define COMMAND_SCAN_34             0xA4
+#define COMMAND_SCAN_34_SLOWER      0xA5
+#define COMMAND_SCAN_PHOTO          0xA6
+#define COMMAND_HEARTBEAT           0xA7
 
 int windowWidth = 1030;
 int windowHeight = 1265;
@@ -26,10 +39,12 @@ void setupTexture(GLuint *glTexture, uint8_t *pixels, SEMCapture *capture);
 void HandleEvent(SDL_Event *event, bool *shouldQuit);
 void Quit(SDL_Window *window, SDL_GLContext &glContext, uint8_t *pixels);
 void CreateWindow(SDL_WindowFlags &windowFlags, SDL_Window *&window, SDL_GLContext &glContext);
-bool InitSEMCapture(SEMCapture *ci, const char *dataFilePath);
+bool InitSEMCapture(SEMCapture *ci, const char *dataFilePath, struct termios *termios);
 void DeleteSEMCapture(SEMCapture *ci);
 void ParseSEMCaptureData(SEMCapture *ci, SEMCapturePixels *p, int bytesRead);
 void ParseStatusBytes(SEMCapture *ci, SEMCapturePixels *p, uint16_t &i);
+
+void SendCommand(uint8_t command, const SEMCapture &capture);
 
 int main(int argc, char *argv[]) {
     SDL_Window *window = NULL;
@@ -40,11 +55,14 @@ int main(int argc, char *argv[]) {
 
     uint32_t bytesRead = 0;      // reset every time the buffer is read
     uint32_t totalBytesRead = 0; // total
+    uint8_t *outputBuffer = NULL;
+
+    uint32_t statusTimer = 0;
 
     SEMCapture capture;
-    if (!InitSEMCapture(&capture, DATA_FILE)) {
-        printf("Unable to init the SEM capture. Quitting\n");
-        return -1;
+    struct termios termios;
+    if (!InitSEMCapture(&capture, DATA_FILE, &termios)) {
+        printf("Unable to init the SEM capture.\n");
     }
 
     SEMCapturePixels capturePixels;
@@ -88,6 +106,7 @@ int main(int argc, char *argv[]) {
     glClearColor(background.x, background.y, background.z, background.w);
     bool shouldQuit = false;
 
+
     while (!shouldQuit) {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
         SDL_Event event;
@@ -130,37 +149,58 @@ int main(int argc, char *argv[]) {
                 ImGuiCond_Always);
 
             ImGui::Begin("Controls");
-            if (ImGui::TreeNode("Firmware")) {
-                if (ImGui::Button("Scan Rapid")) { printf("Counter button clicked.\n"); }
-                if (ImGui::Button("Scan Half")) { printf("Counter button clicked.\n"); }
-                if (ImGui::Button("Scan 3/4")) { printf("Counter button clicked.\n"); }
-                if (ImGui::Button("Scan Photo")) { printf("Counter button clicked.\n"); }
-                ImGui::TreePop();
-            }
-            if (ImGui::TreeNode("Capture")) {
+            ImGui::Text("Scan Speed");
+            ImGui::Dummy(ImVec2(0.0f, 4.0f));
+            ImGui::Indent();
+                if (ImGui::Button("Restart Scan")) { SendCommand(COMMAND_SCAN_RESTART, capture); }
+                if (ImGui::Button("Scan Rapid")) { SendCommand(COMMAND_SCAN_RAPID, capture); }
+                if (ImGui::Button("Scan Half")) { SendCommand(COMMAND_SCAN_HALF, capture); }
+                if (ImGui::Button("Scan Half Slower")) { SendCommand(COMMAND_SCAN_HALF_SLOWER, capture); }
+                if (ImGui::Button("Scan 3/4")) { SendCommand(COMMAND_SCAN_34, capture); }
+                if (ImGui::Button("Scan 3/4 Slower")) { SendCommand(COMMAND_SCAN_34_SLOWER, capture); }
+                if (ImGui::Button("Scan Photo")) { SendCommand(COMMAND_SCAN_PHOTO, capture); }
+            ImGui::Unindent();
+            ImGui::Dummy(ImVec2(0.0f, 4.0f));
+            ImGui::Text("Capture");
+            ImGui::Dummy(ImVec2(0.0f, 4.0f));
+            ImGui::Indent();
                 if (ImGui::Button("Save next frame")) { printf("Counter button clicked.\n"); }
                 if (ImGui::Button("Begin stacked capture")) { printf("Counter button clicked.\n"); }
                 if (ImGui::Button("End stacked capture")) { printf("Counter button clicked.\n"); }
-                ImGui::TreePop();
-            }
+            ImGui::Unindent();
+            ImGui::Dummy(ImVec2(0.0f, 4.0f));
             ImGui::End();
 
             ImGui::Begin("Status", NULL, ImGuiWindowFlags_AlwaysAutoResize);
-            ImGui::Indent();
-            ImGui::Dummy(ImVec2(0.0f, 1.0f));
-            ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), "Last Row");
-            ImGui::Text(capture.status == CaptureStatus::STATUS_RUNNING ? "Status:\t\tRunning": "Status:\t\tPaused");
-            ImGui::Text("Device:\t\t%s", DATA_FILE);
-            ImGui::Text("Scan mode:\t\t%d", capture.scanMode);
-            ImGui::Text("Pulse Time (s): %f", capture.syncDuration);
-            ImGui::Text("Row Time(s):\t%f", capture.frameDuration);
-            ImGui::Text("MB captured:\t%f", capture.bytesRead/1e6);
-            ImGui::Dummy(ImVec2(0.0f, 1.0f));
-            ImGui::Dummy(ImVec2(0.0f, 1.0f));
-            ImGui::Text("FPS avg: %.2f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate,
-                        ImGui::GetIO().Framerate);
-            ImGui::Dummy(ImVec2(0.0f, 1.0f));
+                ImGui::Indent();
+                ImGui::Dummy(ImVec2(0.0f, 4.0f));
+                if (ImGui::Button("Heartbeat")) { SendCommand(COMMAND_HEARTBEAT, capture); }
+                if (capture.heartbeat) {
+                    ImGui::Text("System heartbeat OK!");
+                    statusTimer += 1;
+                    if (statusTimer >= 60) {
+                        capture.heartbeat = 0;
+                        statusTimer = 0;
+                    }
+                }
+                ImGui::Dummy(ImVec2(0.0f, 4.0f));
+                ImGui::Text(capture.status == CaptureStatus::STATUS_RUNNING ? "Status:\t\tRunning": "Status:\t\tNo Data");
+                ImGui::Text("Device:\t\t%s", DATA_FILE);
+
+                ImGui::Dummy(ImVec2(0.0f, 4.0f));
+                ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), "Last Row");
+                ImGui::Text("Scan mode:\t\t%d", capture.scanMode);
+                ImGui::Text("Pulse Time (s): %f", capture.syncDuration);
+                ImGui::Text("Row Time(s):\t%f", capture.frameDuration);
+                ImGui::Text("MB captured:\t%f", capture.bytesRead/1e6);
+                ImGui::Dummy(ImVec2(0.0f, 1.0f));
+                ImGui::Dummy(ImVec2(0.0f, 1.0f));
+                ImGui::Text("FPS avg: %.2f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate,
+                            ImGui::GetIO().Framerate);
+                ImGui::Dummy(ImVec2(0.0f, 1.0f));
             ImGui::Unindent();
+            ImGui::Dummy(ImVec2(0.0f, 4.0f));
+            if (ImGui::Button("Restart all")) { InitSEMCapture(&capture, DATA_FILE, &termios); }
             ImGui::End();
 
             ImGui::Begin("Live output", NULL, ImGuiWindowFlags_AlwaysAutoResize);
@@ -177,6 +217,10 @@ int main(int argc, char *argv[]) {
     Quit(window, glContext, capturePixels.pixels);
 
     return 0;
+}
+
+void SendCommand(uint8_t command, const SEMCapture &capture) {
+    write(capture.datafile, &command, 1);
 }
 
 void CreateWindow(SDL_WindowFlags &windowFlags, SDL_Window *&window, SDL_GLContext &glContext) {
@@ -275,16 +319,21 @@ void setupTexture(GLuint *glTexture, uint8_t *pixels, SEMCapture *capture) {
  * @param dataFilePath
  * @return True if init success, false otherwise
  */
-bool InitSEMCapture(SEMCapture *ci, const char *dataFilePath) {
+bool InitSEMCapture(SEMCapture *ci, const char *dataFilePath, struct termios *termios) {
     bool succ = true;
     ci->dataBuffer = static_cast<uint16_t *>(malloc(ci->BUF_SIZEOF_BYTES));
     memset(ci->dataBuffer, 0xFF, ci->BUF_SIZEOF_BYTES);
 
-    ci->datafile = open(dataFilePath, O_RDONLY);
+    ci->datafile = open(dataFilePath, FILE_ACCESS_MODE);
     if (ci->datafile == -1) {
         printf("Unable to open file %s!\n", dataFilePath);
         succ = false;
     }
+
+    tcgetattr(ci->datafile, termios);
+    termios->c_lflag &= ~ICANON;
+    termios->c_cc[VTIME] = 50;
+    tcsetattr(ci->datafile, TCSANOW, termios);
 
     return succ;
 }
@@ -303,8 +352,11 @@ void ParseSEMCaptureData(SEMCapture *ci, SEMCapturePixels *p, int bytesRead) {
     uint32_t loc;
 
     for (uint16_t i=0; i<(bytesRead/sizeof(uint16_t)); i++) {
-        while (buf[i] == 0xFEFA || buf[i] == 0xFEFB) {
+        while (buf[i] == 0xFEFA || buf[i] == 0xFEFB || buf[i] == 0xFEFC) {
             ParseStatusBytes(ci, p, i);
+        }
+        if (i >= (bytesRead/sizeof(uint16_t))) {
+            break;
         }
         if (buf[i] > p->max && buf[i] < MAX_ADC_VAL) {
             p->max = buf[i];
@@ -356,6 +408,11 @@ void ParseStatusBytes(SEMCapture *ci, SEMCapturePixels *p, uint16_t &i) {
     if (buf[i] == 0xFEFB) {
 //        printf("New frame\n");
         ci->newFrame = 1;
+    } else if (buf[i] = 0xFEFC) {
+        printf("Heartbeat!\n");
+        ci->heartbeat = 1;
+        i+=6;
+        return;
     }
     ci->syncDuration    = buf[++i];
     ci->syncDuration   += ((double)buf[++i]) / 1e6;

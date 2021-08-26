@@ -24,6 +24,7 @@ struct SEMCapture {
     uint32_t bytesRead = 0;
     uint8_t newFrame = 0;
     CaptureStatus status;
+    uint8_t heartbeat = 0;
 };
 
 #endif //S2500_IMAGE_VIEWER_SEM_CAPTURE_INFO_H
