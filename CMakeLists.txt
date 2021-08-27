@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD 14)
 find_package(OpenGL REQUIRED)
 find_package(SDL2 REQUIRED)
 add_library("glad" "glad/src/glad.c")
+find_package(Threads REQUIRED)
 
 include_directories("glad/include")
 include_directories(${SDL2_INCLUDE_DIRS})
@@ -34,6 +35,7 @@ add_executable(${CMAKE_PROJECT_NAME} ${sources})
 
 target_link_libraries(${CMAKE_PROJECT_NAME}
     "glad"
+    Threads::Threads
     ${OPENGL_gl_LIBRARY}
     ${SDL2_LIBRARIES}
     ${CMAKE_DL_LIBS}

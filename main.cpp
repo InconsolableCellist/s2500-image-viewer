@@ -13,6 +13,8 @@
 #include "sem_capture_pixels.h"
 #include <sys/time.h>
 #include <termios.h>
+#include <thread>
+#include <mutex>
 
 #define MAX_ADC_VAL 8192
 
@@ -31,7 +33,7 @@ const char *DATA_FILE = "/dev/ttyACM1";
 #define COMMAND_SCAN_PHOTO          0xA6
 #define COMMAND_HEARTBEAT           0xA7
 
-int windowWidth = 1030;
+int windowWidth = 1140;
 int windowHeight = 1265;
 
 void SetGLAttributes();
@@ -43,69 +45,40 @@ bool InitSEMCapture(SEMCapture *ci, const char *dataFilePath, struct termios *te
 void DeleteSEMCapture(SEMCapture *ci);
 void ParseSEMCaptureData(SEMCapture *ci, SEMCapturePixels *p, ssize_t bytesRead);
 void ParseStatusBytes(SEMCapture *ci, SEMCapturePixels *p, uint16_t &i);
-
 void SendCommand(uint8_t command, const SEMCapture &capture);
+void ImGuiFrame(uint32_t statusTimer, SEMCapture &capture, termios &termios, GLuint glTexture,
+    std::thread &captureThread, std::mutex &bufferLock, ssize_t &bytesRead);
+void SetupGLAndImgui(SDL_Window *window, SDL_GLContext glContext, SEMCapturePixels &capturePixels, SEMCapture &capture,
+                     GLuint &glTexture);
+void GrabBytes(ssize_t &bytesRead, SEMCapture &ci, std::mutex &bufferLock);
 
 int main(int argc, char *argv[]) {
     SDL_Window *window = NULL;
     SDL_WindowFlags windowFlags;
-    SDL_Renderer *renderer = NULL;
-    SDL_Texture *texture = NULL;
     SDL_GLContext glContext;
-
+    GLuint glTexture;
     ssize_t bytesRead = 0;      // reset every time the buffer is read
     uint32_t totalBytesRead = 0; // total
-    uint8_t *outputBuffer = NULL;
-
     uint32_t statusTimer = 0;
+    std::mutex bufferLock;
 
     SEMCapture capture;
     struct termios termios;
     if (!InitSEMCapture(&capture, DATA_FILE, &termios)) {
         printf("Unable to init the SEM capture.\n");
     }
+    capture.shouldCapture = true;
+    std::thread captureThread(GrabBytes, std::ref(bytesRead), std::ref(capture), std::ref(bufferLock));
 
     SEMCapturePixels capturePixels;
     capturePixels.pixels = (uint8_t*)malloc((capture.sourceWidth * capture.sourceHeight * 4));
     memset(capturePixels.pixels, 0x00, capture.sourceWidth * capture.sourceHeight * 4);
 
-//    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-//        printf("[ERROR] %s\n", SDL_GetError());
-//        return -1;
-//    }
-
     SetGLAttributes();
-
     CreateWindow(windowFlags, window, glContext);
+    SetupGLAndImgui(window, glContext, capturePixels, capture, glTexture);
 
-//    SDL_GL_SetSwapInterval(1);
-
-    if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
-        printf("[ERROR] Couldn't initialize glad\n");
-    } else {
-        printf("[INFO] glad initialized.\n");
-    }
-
-    glViewport(0, 0, windowWidth, windowHeight);
-
-    GLuint glTexture;
-    setupTexture(&glTexture, capturePixels.pixels, &capture);
-
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO &io = ImGui::GetIO();
-    (void)io; // wut
-
-    ImGui::StyleColorsDark();
-
-    ImGui_ImplSDL2_InitForOpenGL(window, glContext);
-    ImGui_ImplOpenGL3_Init("#version 130");
-
-    ImVec4 background = ImVec4(35/255.0f, 35/255.0f, 35/255.0f, 1.00f);
-
-    glClearColor(background.x, background.y, background.z, background.w);
     bool shouldQuit = false;
-
 
     while (!shouldQuit) {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
@@ -114,111 +87,147 @@ int main(int argc, char *argv[]) {
             HandleEvent(&event, &shouldQuit);
         }
 
-        bytesRead = read(capture.datafile, capture.dataBuffer, capture.BUF_SIZEOF_BYTES);
-        capture.bytesRead += bytesRead;
-        if (bytesRead <= 0) {
-            capture.status = CaptureStatus::STATUS_PAUSED;
-            printf("End of data or error. Status: %d. Total read: %d. Errno: %d\n",
-                bytesRead, totalBytesRead, errno);
-//            printf("Press any key to exit...\n");
-//            getchar();
-//            shouldQuit = true;
-            // TODO: non-fatal, GUI handling of dead stream
-        } else {
-            capture.status = CaptureStatus::STATUS_RUNNING;
+        if (!capture.bufferReadyForWrite && bufferLock.try_lock()) {
+            if (bytesRead <= 0) {
+                capture.status = CaptureStatus::STATUS_PAUSED;
+//                printf("End of data or error. Status: %d. Total read: %d. Errno: %d\n", bytesRead, totalBytesRead, errno);
+            } else {
+                capture.status = CaptureStatus::STATUS_RUNNING;
+                capture.bytesRead += bytesRead;
+            }
+
+            if (capture.status == CaptureStatus::STATUS_RUNNING) {
+                ParseSEMCaptureData(&capture, &capturePixels, bytesRead);
+            }
+            capture.bufferReadyForWrite = true;
+            bufferLock.unlock();
         }
 
-        if (capture.status == CaptureStatus::STATUS_RUNNING) {
-            ParseSEMCaptureData(&capture, &capturePixels, bytesRead);
-        }
-//        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, capture.sourceWidth, capture.sourceHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, capturePixels.pixels);
+        // TODO: render only a region
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, capture.sourceWidth, capture.sourceHeight, GL_RGBA, GL_UNSIGNED_BYTE, capturePixels.pixels);
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL2_NewFrame(window);
-        ImGui::NewFrame();
-        {
-            static int counter = 0;
-            int sdl_width = 0;
-            int sdl_height = 0;
-            int controls_width = 0;
-            controls_width = sdl_width;
-
-            if ((controls_width /= 3) < 300) { controls_width = 300; }
-            ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always);
-            ImGui::SetNextWindowSize(
-                ImVec2(static_cast<float>(controls_width), static_cast<float>(sdl_height - 20)),
-                ImGuiCond_Always);
-
-            ImGui::Begin("Controls");
-            ImGui::Text("Scan Speed");
-            ImGui::Dummy(ImVec2(0.0f, 4.0f));
-            ImGui::Indent();
-                if (ImGui::Button("Restart Scan")) { SendCommand(COMMAND_SCAN_RESTART, capture); }
-                if (ImGui::Button("Scan Rapid")) { SendCommand(COMMAND_SCAN_RAPID, capture); }
-                if (ImGui::Button("Scan Half")) { SendCommand(COMMAND_SCAN_HALF, capture); }
-                if (ImGui::Button("Scan Half Slower")) { SendCommand(COMMAND_SCAN_HALF_SLOWER, capture); }
-                if (ImGui::Button("Scan 3/4")) { SendCommand(COMMAND_SCAN_34, capture); }
-                if (ImGui::Button("Scan 3/4 Slower")) { SendCommand(COMMAND_SCAN_34_SLOWER, capture); }
-                if (ImGui::Button("Scan Photo")) { SendCommand(COMMAND_SCAN_PHOTO, capture); }
-            ImGui::Unindent();
-            ImGui::Dummy(ImVec2(0.0f, 4.0f));
-            ImGui::Text("Capture");
-            ImGui::Dummy(ImVec2(0.0f, 4.0f));
-            ImGui::Indent();
-                if (ImGui::Button("Save next frame")) { printf("Counter button clicked.\n"); }
-                if (ImGui::Button("Begin stacked capture")) { printf("Counter button clicked.\n"); }
-                if (ImGui::Button("End stacked capture")) { printf("Counter button clicked.\n"); }
-            ImGui::Unindent();
-            ImGui::Dummy(ImVec2(0.0f, 4.0f));
-            ImGui::End();
-
-            ImGui::Begin("Status", NULL, ImGuiWindowFlags_AlwaysAutoResize);
-                ImGui::Indent();
-                ImGui::Dummy(ImVec2(0.0f, 4.0f));
-                if (ImGui::Button("Heartbeat")) { SendCommand(COMMAND_HEARTBEAT, capture); }
-                if (capture.heartbeat) {
-                    ImGui::Text("System heartbeat OK!");
-                    statusTimer += 1;
-                    if (statusTimer >= 60) {
-                        capture.heartbeat = 0;
-                        statusTimer = 0;
-                    }
-                }
-                ImGui::Dummy(ImVec2(0.0f, 4.0f));
-                ImGui::Text(capture.status == CaptureStatus::STATUS_RUNNING ? "Status:\t\tRunning": "Status:\t\tNo Data");
-                ImGui::Text("Device:\t\t%s", DATA_FILE);
-
-                ImGui::Dummy(ImVec2(0.0f, 4.0f));
-                ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), "Last Row");
-                ImGui::Text("Scan mode:\t\t%d", capture.scanMode);
-                ImGui::Text("Pulse Time (s): %f", capture.syncDuration);
-                ImGui::Text("Row Time(s):\t%f", capture.frameDuration);
-                ImGui::Text("MB captured:\t%f", capture.bytesRead/1e6);
-                ImGui::Dummy(ImVec2(0.0f, 1.0f));
-                ImGui::Dummy(ImVec2(0.0f, 1.0f));
-                ImGui::Text("FPS avg: %.2f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate,
-                            ImGui::GetIO().Framerate);
-                ImGui::Dummy(ImVec2(0.0f, 1.0f));
-            ImGui::Unindent();
-            ImGui::Dummy(ImVec2(0.0f, 4.0f));
-            if (ImGui::Button("Restart all")) { InitSEMCapture(&capture, DATA_FILE, &termios); }
-            ImGui::End();
-
-            ImGui::Begin("Live output", NULL, ImGuiWindowFlags_AlwaysAutoResize);
-            ImGui::Image((void*)(intptr_t)glTexture, ImVec2(capture.sourceWidth, capture.sourceHeight));
-            ImGui::End();
-        }
+        ImGuiFrame(statusTimer, capture, termios, glTexture, captureThread, bufferLock, bytesRead);
 
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         SDL_GL_SwapWindow(window);
     }
 
+    capture.shouldCapture = false;
+    captureThread.join();
     DeleteSEMCapture(&capture);
     Quit(window, glContext, capturePixels.pixels);
 
     return 0;
+}
+
+void SetupGLAndImgui(SDL_Window *window, SDL_GLContext glContext, SEMCapturePixels &capturePixels, SEMCapture &capture,
+                     GLuint &glTexture) {
+    if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
+        printf("[ERROR] Couldn't initialize glad\n");
+    } else {
+        printf("[INFO] glad initialized.\n");
+    }
+
+    glViewport(0, 0, windowWidth, windowHeight);
+    setupTexture(&glTexture, capturePixels.pixels, &capture);
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO &io = ImGui::GetIO();
+    (void)io; // wut
+    ImGui::StyleColorsDark();
+    ImGui_ImplSDL2_InitForOpenGL(window, glContext);
+    ImGui_ImplOpenGL3_Init("#version 130");
+    ImVec4 background = ImVec4(35/255.0f, 35/255.0f, 35/255.0f, 1.00f);
+    glClearColor(background.x, background.y, background.z, background.w);
+}
+
+void ImGuiFrame(uint32_t statusTimer, SEMCapture &capture, termios &termios, GLuint glTexture,
+    std::thread &captureThread, std::mutex &bufferLock, ssize_t &bytesRead) {
+    ImGui::NewFrame();
+    {
+        static int counter = 0;
+        int sdl_width = 0;
+        int sdl_height = 0;
+        int controls_width = 0;
+        controls_width = sdl_width;
+
+        if ((controls_width /= 3) < 300) { controls_width = 300; }
+        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(
+            ImVec2(static_cast<float>(controls_width), static_cast<float>(sdl_height - 20)),
+            ImGuiCond_Always);
+
+        ImGui::Begin("Controls");
+        ImGui::Text("Scan Speed");
+        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        ImGui::Indent();
+            if (ImGui::Button("Restart Scan")) { SendCommand(COMMAND_SCAN_RESTART, capture); }
+            if (ImGui::Button("Scan Rapid")) { SendCommand(COMMAND_SCAN_RAPID, capture); }
+            if (ImGui::Button("Scan Half")) { SendCommand(COMMAND_SCAN_HALF, capture); }
+            if (ImGui::Button("Scan Half Slower")) { SendCommand(COMMAND_SCAN_HALF_SLOWER, capture); }
+            if (ImGui::Button("Scan 3/4")) { SendCommand(COMMAND_SCAN_34, capture); }
+            if (ImGui::Button("Scan 3/4 Slower")) { SendCommand(COMMAND_SCAN_34_SLOWER, capture); }
+            if (ImGui::Button("Scan Photo")) { SendCommand(COMMAND_SCAN_PHOTO, capture); }
+        ImGui::Unindent();
+        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        ImGui::Text("Capture");
+        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        ImGui::Indent();
+            if (ImGui::Button("Save next frame")) { printf("Counter button clicked.\n"); }
+            if (ImGui::Button("Begin stacked capture")) { printf("Counter button clicked.\n"); }
+            if (ImGui::Button("End stacked capture")) { printf("Counter button clicked.\n"); }
+        ImGui::Unindent();
+        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        ImGui::End();
+
+        ImGui::Begin("Status", NULL, ImGuiWindowFlags_AlwaysAutoResize);
+            ImGui::Indent();
+            ImGui::Dummy(ImVec2(0.0f, 4.0f));
+            if (ImGui::Button("Heartbeat")) { SendCommand(COMMAND_HEARTBEAT, capture); }
+            if (capture.heartbeat) {
+                ImGui::Text("System heartbeat OK!");
+                statusTimer += 1;
+                if (statusTimer >= 60) {
+                    capture.heartbeat = 0;
+                    statusTimer = 0;
+                }
+            }
+            ImGui::Dummy(ImVec2(0.0f, 4.0f));
+            ImGui::Text(capture.status == STATUS_RUNNING ? "Status:\t\tRunning": "Status:\t\tNo Data");
+            ImGui::Text("Device:\t\t%s", DATA_FILE);
+
+            ImGui::Dummy(ImVec2(0.0f, 4.0f));
+            ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), "Last Row");
+            ImGui::Text("Scan mode:\t\t%d", capture.scanMode);
+            ImGui::Text("Pulse Time (s): %f", capture.syncDuration);
+            ImGui::Text("Row Time(s):\t%f", capture.frameDuration);
+            ImGui::Text("MB captured:\t%f", capture.bytesRead/1e6);
+            ImGui::Dummy(ImVec2(0.0f, 1.0f));
+            ImGui::Dummy(ImVec2(0.0f, 1.0f));
+            ImGui::Text("FPS avg: %.2f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate,
+                        ImGui::GetIO().Framerate);
+            ImGui::Dummy(ImVec2(0.0f, 1.0f));
+        ImGui::Unindent();
+        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        if (ImGui::Button("Restart all")) {
+            bufferLock.lock();
+            capture.shouldCapture = false;
+            capture.bufferReadyForWrite = true;
+            bufferLock.unlock();
+            captureThread.join();
+            InitSEMCapture(&capture, DATA_FILE, &termios);
+            capture.shouldCapture = true;
+            captureThread = std::thread(GrabBytes, std::ref(bytesRead), std::ref(capture), std::ref(bufferLock));
+        }
+        ImGui::End();
+
+        ImGui::Begin("Live output", NULL, ImGuiWindowFlags_AlwaysAutoResize);
+        ImGui::Image((void*)(intptr_t)glTexture, ImVec2(capture.sourceWidth, capture.sourceHeight));
+        ImGui::End();
+    }
 }
 
 void SendCommand(uint8_t command, const SEMCapture &capture) {
@@ -445,4 +454,15 @@ void ParseStatusBytes(SEMCapture *ci, SEMCapturePixels *p, uint16_t &i) {
     ci->syncAverage += ci->syncDuration;
 
     i++;
+}
+
+void GrabBytes(ssize_t &bytesRead, SEMCapture &ci, std::mutex &bufferLock) {
+    while (ci.shouldCapture) {
+        if (ci.bufferReadyForWrite) {
+            bufferLock.lock();
+            ci.bufferReadyForWrite = false;
+            bytesRead = read(ci.datafile, ci.dataBuffer, ci.BUF_SIZEOF_BYTES);
+            bufferLock.unlock();
+        }
+    }
 }
