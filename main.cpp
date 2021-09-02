@@ -21,7 +21,7 @@
 //const char *DATA_FILE = "../data.dat";
 //#define FILE_ACCESS_MODE O_RDONLY
 
-const char *DATA_FILE = "/dev/ttyACM1";
+const char *DATA_FILE = "/dev/ttyACM2";
 #define FILE_ACCESS_MODE O_RDWR
 
 #define COMMAND_SCAN_RESTART        0xA0
@@ -46,7 +46,7 @@ void DeleteSEMCapture(SEMCapture *ci);
 void ParseSEMCaptureData(SEMCapture *ci, SEMCapturePixels *p, ssize_t bytesRead);
 void ParseStatusBytes(SEMCapture *ci, SEMCapturePixels *p, uint16_t &i);
 void SendCommand(uint8_t command, const SEMCapture &capture);
-void ImGuiFrame(uint32_t statusTimer, SEMCapture &capture, termios &termios, GLuint glTexture,
+void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, termios &termios, GLuint glTexture,
     std::thread &captureThread, std::mutex &bufferLock, ssize_t &bytesRead);
 void SetupGLAndImgui(SDL_Window *window, SDL_GLContext glContext, SEMCapturePixels &capturePixels, SEMCapture &capture,
                      GLuint &glTexture);
@@ -116,6 +116,7 @@ int main(int argc, char *argv[]) {
     }
 
     capture.shouldCapture = false;
+    capture.bufferReadyForWrite = false;
     captureThread.join();
     DeleteSEMCapture(&capture);
     Quit(window, glContext, capturePixels.pixels);
@@ -144,11 +145,10 @@ void SetupGLAndImgui(SDL_Window *window, SDL_GLContext glContext, SEMCapturePixe
     glClearColor(background.x, background.y, background.z, background.w);
 }
 
-void ImGuiFrame(uint32_t statusTimer, SEMCapture &capture, termios &termios, GLuint glTexture,
+void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, termios &termios, GLuint glTexture,
     std::thread &captureThread, std::mutex &bufferLock, ssize_t &bytesRead) {
     ImGui::NewFrame();
     {
-        static int counter = 0;
         int sdl_width = 0;
         int sdl_height = 0;
         int controls_width = 0;
@@ -231,7 +231,8 @@ void ImGuiFrame(uint32_t statusTimer, SEMCapture &capture, termios &termios, GLu
 }
 
 void SendCommand(uint8_t command, const SEMCapture &capture) {
-    write(capture.datafile, &command, 1);
+    ssize_t bytesWritten = write(capture.datafile, &command, 1);
+    printf("num bytes written: %d\n", bytesWritten);
 }
 
 void CreateWindow(SDL_WindowFlags &windowFlags, SDL_Window *&window, SDL_GLContext &glContext) {
@@ -335,7 +336,7 @@ bool InitSEMCapture(SEMCapture *ci, const char *dataFilePath, struct termios *te
     ci->dataBuffer = static_cast<uint16_t *>(malloc(ci->BUF_SIZEOF_BYTES));
     memset(ci->dataBuffer, 0xFF, ci->BUF_SIZEOF_BYTES);
 
-    ci->datafile = open(dataFilePath, FILE_ACCESS_MODE, O_NONBLOCK);
+    ci->datafile = open(dataFilePath, FILE_ACCESS_MODE, 0);
     if (ci->datafile == -1) {
         printf("Unable to open file %s!\n", dataFilePath);
         succ = false;
@@ -343,7 +344,8 @@ bool InitSEMCapture(SEMCapture *ci, const char *dataFilePath, struct termios *te
 
     tcgetattr(ci->datafile, termios);
     termios->c_lflag &= ~ICANON;
-    termios->c_cc[VTIME] = 10;
+    termios->c_cc[VTIME] = 10; // 1 second max blocking time
+    termios->c_cc[VMIN] = 0;   // return even if no chars (idle serial)
     tcsetattr(ci->datafile, TCSANOW, termios);
 
     return succ;
