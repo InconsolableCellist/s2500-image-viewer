@@ -81,7 +81,6 @@ int main(int argc, char *argv[]) {
     memset(capturePixels.pixels, 0x00, capture.sourceWidth * capture.sourceHeight * 4);
 
     writer = new SequenceWriter(currentSequenceNumber);
-    writer->shouldCapture = true;
 
     SetGLAttributes();
     CreateWindow(windowFlags, window, glContext);
@@ -248,6 +247,10 @@ void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, termios &termios, GL
             }
             ImGui::End();
         }
+
+        ImGui::Begin("Save Captures");
+        ImGui::Checkbox("Save frames to disk", &writer->shouldWrite);
+        ImGui::End();
     }
 }
 
@@ -466,7 +469,7 @@ void ParseStatusBytes(SEMCapture *ci, SEMCapturePixels *p, uint16_t &i) {
         ci->newFrame = 0;
         p->x = 0;
         p->y = 0;
-        if (ci->shouldCapture && writer) {
+        if (writer && writer->shouldWrite) {
             free(writer->saveNextFileInSequence(*ci, *p));
         }
     } else {

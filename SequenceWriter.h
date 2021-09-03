@@ -16,7 +16,7 @@ class SequenceWriter {
         char *relativeDirectoryName;
 
     public:
-        bool shouldCapture = false;
+        bool shouldWrite = false;
 
         SequenceWriter(int sequenceNumber);
         ~SequenceWriter();
