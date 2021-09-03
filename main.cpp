@@ -34,6 +34,8 @@ const char *DATA_FILE = "../data.dat";
 int windowWidth = 1140;
 int windowHeight = 1265;
 
+SequenceWriter *writer = nullptr;
+
 void SetGLAttributes();
 void setupTexture(GLuint *glTexture, uint8_t *pixels, SEMCapture *capture);
 void HandleEvent(SDL_Event *event, bool *shouldQuit);
@@ -78,16 +80,8 @@ int main(int argc, char *argv[]) {
     capturePixels.pixels = (uint8_t*)malloc((capture.sourceWidth * capture.sourceHeight * 4));
     memset(capturePixels.pixels, 0x00, capture.sourceWidth * capture.sourceHeight * 4);
 
-    SequenceWriter *writer = new SequenceWriter(currentSequenceNumber);
-    free(writer->saveNextFileInSequence(capture, capturePixels));
-    free(writer->saveNextFileInSequence(capture, capturePixels));
-    free(writer->saveNextFileInSequence(capture, capturePixels));
-    free(writer->saveNextFileInSequence(capture, capturePixels));
-    writer->IncrementSequenceNumber();
-    free(writer->saveNextFileInSequence(capture, capturePixels));
-    free(writer->saveNextFileInSequence(capture, capturePixels));
-    free(writer->saveNextFileInSequence(capture, capturePixels));
-    free(writer->saveNextFileInSequence(capture, capturePixels));
+    writer = new SequenceWriter(currentSequenceNumber);
+    writer->shouldCapture = true;
 
     SetGLAttributes();
     CreateWindow(windowFlags, window, glContext);
@@ -472,6 +466,9 @@ void ParseStatusBytes(SEMCapture *ci, SEMCapturePixels *p, uint16_t &i) {
         ci->newFrame = 0;
         p->x = 0;
         p->y = 0;
+        if (ci->shouldCapture && writer) {
+            free(writer->saveNextFileInSequence(*ci, *p));
+        }
     } else {
         // Just an X pulse
 //        Logger::Instance()->log("x pulse\n\tx: %d\n\tscanMode: %d\n\tpulse duration: %f\n\tframe duration: %f", p->x, ci->scanMode, ci->syncDuration, ci->frameDuration);

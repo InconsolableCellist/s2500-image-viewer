@@ -37,15 +37,17 @@ SequenceWriter::~SequenceWriter() {
  * Given a valid SEMCapature and SEMCapturePixels, opens the next image in the sequence in the target directory
  * and writes it. Returns the relative file path and name to the saved file.
  *
- * The returned fileName MUST BE free()'d BY THE CALLING FUNCTION
+ * If the returned fileName isn't an empty string it MUST BE free()'d BY THE CALLING FUNCTION
  *
  * @param captureInfo
  * @param pixels
- * @return A pointer to the null-terminated fileName char array (max 64 chars) which MUST BE FREED BY THE CALLER.
+ * @return Either a pointer to the null-terminated fileName char array (max 64 chars) which MUST BE FREED BY THE CALLER.
+ * or an empty string in the case of an error (which shouldn't be freed)
  */
 char *SequenceWriter::saveNextFileInSequence(SEMCapture &captureInfo, SEMCapturePixels &pixels) {
     char fileName[256];
     struct stat st = {0};
+    FILE *imageFile;
 
     snprintf(fileName, sizeof(fileName), "%s/%d", relativeDirectoryName, sequenceNumber);
     if (stat(fileName, &st) == -1) {
@@ -53,11 +55,29 @@ char *SequenceWriter::saveNextFileInSequence(SEMCapture &captureInfo, SEMCapture
         mkdir(fileName, 0750);
     }
 
-    if (snprintf(fileName, sizeof(fileName), "%s/%d/%0.4d.png", relativeDirectoryName, sequenceNumber, fileNumber) == -1) {
+    if (snprintf(fileName, sizeof(fileName), "%s/%d/%0.4d.ppm", relativeDirectoryName, sequenceNumber, fileNumber) == -1) {
         fileName[sizeof(fileName) - 1] = '\0';
     };
     Logger::Instance()->log("Want to save capture to %s", fileName);
-    fileNumber += 1;
+
+    imageFile = fopen(fileName, "wb");
+    if (!imageFile) {
+        Logger::Instance()->log("Unable to open image file %s!", fileName);
+        snprintf(fileName, 1, "\0");
+    } else {
+        fprintf(imageFile, "P6\n");
+        fprintf(imageFile, "%d %d\n", captureInfo.sourceWidth, captureInfo.sourceHeight);
+        fprintf(imageFile, "255\n"); // max value
+
+        for (int i=0; i<captureInfo.sourceWidth * captureInfo.sourceHeight * 4; i+=4) {
+            fwrite(pixels.pixels + i, 1, 3, imageFile);
+        }
+
+//        fwrite(pixels.pixels, 4, captureInfo.sourceWidth * captureInfo.sourceHeight, imageFile);
+        fclose(imageFile);
+
+        fileNumber += 1;
+    }
 
     return strdup(fileName);
 }

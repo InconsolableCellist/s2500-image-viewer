@@ -16,6 +16,8 @@ class SequenceWriter {
         char *relativeDirectoryName;
 
     public:
+        bool shouldCapture = false;
+
         SequenceWriter(int sequenceNumber);
         ~SequenceWriter();
         int getCurrentFileNum();

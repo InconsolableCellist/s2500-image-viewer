@@ -3,6 +3,8 @@
 
 #include <cstdint>
 
+class SequenceWriter;
+
 enum CaptureStatus {
     STATUS_RUNNING,
     STATUS_PAUSED,
