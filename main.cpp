@@ -2,27 +2,25 @@
 #include <glad/glad.h>
 #include <SDL.h>
 #include <fcntl.h>
-#include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
-#include <ctime>
-#include "imgui-style.h"
 #include "imgui/imgui_impl_sdl.h"
 #include "imgui/imgui_impl_opengl3.h"
 #include "sem_capture_info.h"
 #include "sem_capture_pixels.h"
-#include <sys/time.h>
 #include <termios.h>
 #include <thread>
 #include <mutex>
+#include "Logger.h"
+#include "SequenceWriter.h"
 
 #define MAX_ADC_VAL 8192
 
-//const char *DATA_FILE = "../data.dat";
-//#define FILE_ACCESS_MODE O_RDONLY
+const char *DATA_FILE = "../data.dat";
+#define FILE_ACCESS_MODE O_RDONLY
 
-const char *DATA_FILE = "/dev/ttyACM2";
-#define FILE_ACCESS_MODE O_RDWR
+//const char *DATA_FILE = "/dev/ttyACM2";
+//#define FILE_ACCESS_MODE O_RDWR
 
 #define COMMAND_SCAN_RESTART        0xA0
 #define COMMAND_SCAN_RAPID          0xA1
@@ -47,7 +45,7 @@ void ParseSEMCaptureData(SEMCapture *ci, SEMCapturePixels *p, ssize_t bytesRead)
 void ParseStatusBytes(SEMCapture *ci, SEMCapturePixels *p, uint16_t &i);
 void SendCommand(uint8_t command, const SEMCapture &capture);
 void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, termios &termios, GLuint glTexture,
-    std::thread &captureThread, std::mutex &bufferLock, ssize_t &bytesRead);
+    std::thread &captureThread, std::mutex &bufferLock, ssize_t &bytesRead, bool &logWindowOpen);
 void SetupGLAndImgui(SDL_Window *window, SDL_GLContext glContext, SEMCapturePixels &capturePixels, SEMCapture &capture,
                      GLuint &glTexture);
 void GrabBytes(ssize_t &bytesRead, SEMCapture &ci, std::mutex &bufferLock);
@@ -61,11 +59,17 @@ int main(int argc, char *argv[]) {
     uint32_t totalBytesRead = 0; // total
     uint32_t statusTimer = 0;
     std::mutex bufferLock;
+    bool logWindowOpen = true;
+    int currentSequenceNumber = 0;
 
     SEMCapture capture;
     struct termios termios;
+
+    Logger::Instance()->init();
+    Logger::Instance()->log("Starting up");
+
     if (!InitSEMCapture(&capture, DATA_FILE, &termios)) {
-        printf("Unable to init the SEM capture.\n");
+        Logger::Instance()->log("Unable to init the SEM capture.");
     }
     capture.shouldCapture = true;
     std::thread captureThread(GrabBytes, std::ref(bytesRead), std::ref(capture), std::ref(bufferLock));
@@ -74,12 +78,22 @@ int main(int argc, char *argv[]) {
     capturePixels.pixels = (uint8_t*)malloc((capture.sourceWidth * capture.sourceHeight * 4));
     memset(capturePixels.pixels, 0x00, capture.sourceWidth * capture.sourceHeight * 4);
 
+    SequenceWriter *writer = new SequenceWriter(currentSequenceNumber);
+    free(writer->saveNextFileInSequence(capture, capturePixels));
+    free(writer->saveNextFileInSequence(capture, capturePixels));
+    free(writer->saveNextFileInSequence(capture, capturePixels));
+    free(writer->saveNextFileInSequence(capture, capturePixels));
+    writer->IncrementSequenceNumber();
+    free(writer->saveNextFileInSequence(capture, capturePixels));
+    free(writer->saveNextFileInSequence(capture, capturePixels));
+    free(writer->saveNextFileInSequence(capture, capturePixels));
+    free(writer->saveNextFileInSequence(capture, capturePixels));
+
     SetGLAttributes();
     CreateWindow(windowFlags, window, glContext);
     SetupGLAndImgui(window, glContext, capturePixels, capture, glTexture);
 
     bool shouldQuit = false;
-
     while (!shouldQuit) {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
         SDL_Event event;
@@ -90,7 +104,7 @@ int main(int argc, char *argv[]) {
         if (!capture.bufferReadyForWrite && bufferLock.try_lock()) {
             if (bytesRead <= 0) {
                 capture.status = CaptureStatus::STATUS_PAUSED;
-//                printf("End of data or error. Status: %d. Total read: %d. Errno: %d\n", bytesRead, totalBytesRead, errno);
+//                Logger::Instance()->log("End of data or error. Status: %d. Total read: %d. Errno: %d", bytesRead, totalBytesRead, errno);
             } else {
                 capture.status = CaptureStatus::STATUS_RUNNING;
                 capture.bytesRead += bytesRead;
@@ -108,7 +122,7 @@ int main(int argc, char *argv[]) {
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL2_NewFrame(window);
-        ImGuiFrame(statusTimer, capture, termios, glTexture, captureThread, bufferLock, bytesRead);
+        ImGuiFrame(statusTimer, capture, termios, glTexture, captureThread, bufferLock, bytesRead, logWindowOpen);
 
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -121,15 +135,18 @@ int main(int argc, char *argv[]) {
     DeleteSEMCapture(&capture);
     Quit(window, glContext, capturePixels.pixels);
 
+    Logger::Instance()->log("Shutting down");
+    Logger::Instance()->quit();
+
     return 0;
 }
 
 void SetupGLAndImgui(SDL_Window *window, SDL_GLContext glContext, SEMCapturePixels &capturePixels, SEMCapture &capture,
                      GLuint &glTexture) {
     if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
-        printf("[ERROR] Couldn't initialize glad\n");
+        Logger::Instance()->log("[ERROR] Couldn't initialize glad");
     } else {
-        printf("[INFO] glad initialized.\n");
+        Logger::Instance()->log("[INFO] glad initialized.");
     }
 
     glViewport(0, 0, windowWidth, windowHeight);
@@ -146,7 +163,7 @@ void SetupGLAndImgui(SDL_Window *window, SDL_GLContext glContext, SEMCapturePixe
 }
 
 void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, termios &termios, GLuint glTexture,
-    std::thread &captureThread, std::mutex &bufferLock, ssize_t &bytesRead) {
+    std::thread &captureThread, std::mutex &bufferLock, ssize_t &bytesRead, bool &logWindowOpen) {
     ImGui::NewFrame();
     {
         int sdl_width = 0;
@@ -176,9 +193,9 @@ void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, termios &termios, GL
         ImGui::Text("Capture");
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
         ImGui::Indent();
-            if (ImGui::Button("Save next frame")) { printf("Counter button clicked.\n"); }
-            if (ImGui::Button("Begin stacked capture")) { printf("Counter button clicked.\n"); }
-            if (ImGui::Button("End stacked capture")) { printf("Counter button clicked.\n"); }
+            if (ImGui::Button("Save next frame")) { Logger::Instance()->log("Counter button clicked."); }
+            if (ImGui::Button("Begin stacked capture")) { Logger::Instance()->log("Counter button clicked."); }
+            if (ImGui::Button("End stacked capture")) { Logger::Instance()->log("Counter button clicked."); }
         ImGui::Unindent();
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
         ImGui::End();
@@ -222,17 +239,27 @@ void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, termios &termios, GL
             capture.shouldCapture = true;
             captureThread = std::thread(GrabBytes, std::ref(bytesRead), std::ref(capture), std::ref(bufferLock));
         }
+        ImGui::Checkbox("Show log window", &logWindowOpen);
         ImGui::End();
 
         ImGui::Begin("Live output", NULL, ImGuiWindowFlags_AlwaysAutoResize);
         ImGui::Image((void*)(intptr_t)glTexture, ImVec2(capture.sourceWidth, capture.sourceHeight));
         ImGui::End();
+
+        if (logWindowOpen) {
+            ImGui::Begin("Log window", &logWindowOpen);
+            ImGui::Text("Log");
+            if (ImGui::Button("Close")) {
+                logWindowOpen = false;
+            }
+            ImGui::End();
+        }
     }
 }
 
 void SendCommand(uint8_t command, const SEMCapture &capture) {
     ssize_t bytesWritten = write(capture.datafile, &command, 1);
-    printf("num bytes written: %d\n", bytesWritten);
+    Logger::Instance()->log("num bytes written: %d", bytesWritten);
 }
 
 void CreateWindow(SDL_WindowFlags &windowFlags, SDL_Window *&window, SDL_GLContext &glContext) {
@@ -338,7 +365,7 @@ bool InitSEMCapture(SEMCapture *ci, const char *dataFilePath, struct termios *te
 
     ci->datafile = open(dataFilePath, FILE_ACCESS_MODE, 0);
     if (ci->datafile == -1) {
-        printf("Unable to open file %s!\n", dataFilePath);
+        Logger::Instance()->log("Unable to open file %s!", dataFilePath);
         succ = false;
     }
 
@@ -373,18 +400,18 @@ void ParseSEMCaptureData(SEMCapture *ci, SEMCapturePixels *p, ssize_t bytesRead)
         }
         if (buf[i] > p->max && buf[i] < MAX_ADC_VAL) {
             p->max = buf[i];
-            printf("min/max: %d/%d\n", p->min, p->max);
+            Logger::Instance()->log("min/max: %d/%d", p->min, p->max);
         }
         if (buf[i] < p->min) {
             p->min = buf[i];
-            printf("min/max: %d/%d\n", p->min, p->max);
+            Logger::Instance()->log("min/max: %d/%d", p->min, p->max);
         }
         if (p->max == 0) {
             p->max = 1;
         }
         if (p->y >= ci->sourceHeight) {
             p->y = 0;
-            printf("Frame overflow at byte: %d\n", bytesRead);
+            Logger::Instance()->log("Frame overflow at byte: %d", bytesRead);
         }
         if (p->x < ci->sourceWidth) {
             val = ( ((double)buf[i]) / p->max ) * 255;
@@ -401,7 +428,7 @@ void ParseSEMCaptureData(SEMCapture *ci, SEMCapturePixels *p, ssize_t bytesRead)
 //            p->pixels[(((p->y * ci->sourceWidth) + (p->x) ) *3) + 1]    = val; // G
 //            p->pixels[(((p->y * ci->sourceWidth) + (p->x) ) *3) + 2]    = val; // B
         } else {
-            printf("x overflow at: %d\n", p->x);
+            Logger::Instance()->log("x overflow at: %d", p->x);
             p->x = 0;
             p->y += 1;
         }
@@ -419,10 +446,10 @@ void ParseSEMCaptureData(SEMCapture *ci, SEMCapturePixels *p, ssize_t bytesRead)
 void ParseStatusBytes(SEMCapture *ci, SEMCapturePixels *p, uint16_t &i) {
     uint16_t *buf = ci->dataBuffer;
     if (buf[i] == 0xFEFB) {
-//        printf("New frame\n");
+//        Logger::Instance()->log("New frame");
         ci->newFrame = 1;
-    } else if (buf[i] = 0xFEFC) {
-        printf("Heartbeat!\n");
+    } else if (buf[i] == 0xFEFC) {
+        Logger::Instance()->log("Heartbeat!");
         ci->heartbeat = 1;
         i+=6;
         return;
@@ -447,8 +474,8 @@ void ParseStatusBytes(SEMCapture *ci, SEMCapturePixels *p, uint16_t &i) {
         p->y = 0;
     } else {
         // Just an X pulse
-//        printf("x pulse\n\tx: %d\n\tscanMode: %d\n\tpulse duration: %f\n\tframe duration: %f\n", p->x, ci->scanMode, ci->syncDuration, ci->frameDuration);
-//        printf("\tsyncAverage: %f\n\tmaxSync: %f\n\tminSync: %f\n", ci->syncAverage/ci->syncNum, ci->maxSync, ci->minSync);
+//        Logger::Instance()->log("x pulse\n\tx: %d\n\tscanMode: %d\n\tpulse duration: %f\n\tframe duration: %f", p->x, ci->scanMode, ci->syncDuration, ci->frameDuration);
+//        Logger::Instance()->log("\tsyncAverage: %f\n\tmaxSync: %f\n\tminSync: %f", ci->syncAverage/ci->syncNum, ci->maxSync, ci->minSync);
         p->x = 0;
         p->y += 1;
     }

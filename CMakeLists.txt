@@ -29,6 +29,8 @@ set(sources
     imgui/imgui_impl_opengl3.cpp
     imgui/imgui_impl_opengl3.h
     imgui/imgui_impl_opengl3_loader.h
+    Logger.cpp
+    SequenceWriter.cpp
     main.cpp)
 
 add_executable(${CMAKE_PROJECT_NAME} ${sources})

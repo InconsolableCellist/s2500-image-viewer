@@ -1,14 +1,17 @@
 #ifndef S2500_IMAGE_VIEWER_SEM_CAPTURE_INFO_H
 #define S2500_IMAGE_VIEWER_SEM_CAPTURE_INFO_H
 
+#include <cstdint>
+
 enum CaptureStatus {
     STATUS_RUNNING,
     STATUS_PAUSED,
     STATUS_ERROR,
+    STATUS_UNINITIALIZED,
 };
 
 struct SEMCapture {
-    uint16_t *dataBuffer;
+    uint16_t *dataBuffer = nullptr;
     const uint16_t BUF_SIZE_SAMPLES = 1024;
     const uint16_t BUF_SIZEOF_BYTES = sizeof(uint16_t) * BUF_SIZE_SAMPLES;
     int datafile = 0;
@@ -23,7 +26,7 @@ struct SEMCapture {
     uint32_t syncNum = 0;
     uint32_t bytesRead = 0;
     uint8_t newFrame = 0;
-    CaptureStatus status;
+    CaptureStatus status = STATUS_UNINITIALIZED;
     uint8_t heartbeat = 0;
     bool shouldCapture = false;
     bool bufferReadyForWrite = true;
