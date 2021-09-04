@@ -21,8 +21,10 @@ class SequenceWriter {
         SequenceWriter(int sequenceNumber);
         ~SequenceWriter();
         int getCurrentFileNum();
+        int getCurrentSequenceNum();
         char *saveNextFileInSequence(SEMCapture &captureInfo, SEMCapturePixels &pixels);
         void IncrementSequenceNumber();
+        char *getCurrentDirectoryName();
 };
 
 #endif //S2500_IMAGE_VIEWER_SEQUENCEWRITER_H

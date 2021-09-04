@@ -86,3 +86,16 @@ void SequenceWriter::IncrementSequenceNumber() {
     sequenceNumber += 1;
     fileNumber = 0;
 }
+
+
+int SequenceWriter::getCurrentFileNum() {
+    return fileNumber;
+}
+
+int SequenceWriter::getCurrentSequenceNum() {
+    return sequenceNumber;
+}
+
+char* SequenceWriter::getCurrentDirectoryName() {
+    return relativeDirectoryName;
+}

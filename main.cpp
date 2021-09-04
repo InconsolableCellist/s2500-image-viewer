@@ -61,7 +61,7 @@ int main(int argc, char *argv[]) {
     uint32_t totalBytesRead = 0; // total
     uint32_t statusTimer = 0;
     std::mutex bufferLock;
-    bool logWindowOpen = true;
+    bool logWindowOpen = false;
     int currentSequenceNumber = 0;
 
     SEMCapture capture;
@@ -214,7 +214,7 @@ void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, termios &termios, GL
             ImGui::Text("Scan mode:\t\t%d", capture.scanMode);
             ImGui::Text("Pulse Time (s): %f", capture.syncDuration);
             ImGui::Text("Row Time(s):\t%f", capture.frameDuration);
-            ImGui::Text("MB captured:\t%f", capture.bytesRead/1e6);
+            ImGui::Text("MB received:\t%f", capture.bytesRead/1e6);
             ImGui::Dummy(ImVec2(0.0f, 1.0f));
             ImGui::Dummy(ImVec2(0.0f, 1.0f));
             ImGui::Text("FPS avg: %.2f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate,
@@ -250,6 +250,13 @@ void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, termios &termios, GL
 
         ImGui::Begin("Save Captures");
         ImGui::Checkbox("Save frames to disk", &writer->shouldWrite);
+        ImGui::Text("Current File Number:\t%d", writer->getCurrentFileNum());
+        ImGui::Text("Current Sequence:\t%d", writer->getCurrentSequenceNum());
+        ImGui::Text("Current path:\t%s", writer->getCurrentDirectoryName());
+        if (ImGui::Button("Next Sequence")) {
+            writer->IncrementSequenceNumber();
+        }
+
         ImGui::End();
     }
 }
