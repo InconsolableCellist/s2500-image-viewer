@@ -29,6 +29,7 @@ const char *DATA_FILE = "../data.dat";
 #define COMMAND_SCAN_34             0xA4
 #define COMMAND_SCAN_34_SLOWER      0xA5
 #define COMMAND_SCAN_PHOTO          0xA6
+#define COMMAND_SCAN_PHOTO_SLOWEST  0xA8
 #define COMMAND_HEARTBEAT           0xA7
 
 int windowWidth = 1140;
@@ -181,6 +182,7 @@ void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, termios &termios, GL
             if (ImGui::Button("Scan 3/4")) { SendCommand(COMMAND_SCAN_34, capture); }
             if (ImGui::Button("Scan 3/4 Slower")) { SendCommand(COMMAND_SCAN_34_SLOWER, capture); }
             if (ImGui::Button("Scan Photo")) { SendCommand(COMMAND_SCAN_PHOTO, capture); }
+            if (ImGui::Button("Scan Photo Slowest")) { SendCommand(COMMAND_SCAN_PHOTO_SLOWEST, capture); }
         ImGui::Unindent();
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
         ImGui::Text("Capture");
