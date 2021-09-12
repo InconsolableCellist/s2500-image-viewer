@@ -16,11 +16,10 @@
 
 #define MAX_ADC_VAL 8192
 
-const char *DATA_FILE = "../data.dat";
-#define FILE_ACCESS_MODE O_RDONLY
-
-//const char *DATA_FILE = "/dev/ttyACM2";
-//#define FILE_ACCESS_MODE O_RDWR
+// Data source 0 should always be cached data and will be opened in read-only mode.
+// The others should be devices and will be opened in RW mode
+const char *ttySources[] = { "../data.dat", "/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyACM2", "/dev/ttyACM3", "/dev/ttyACM4" };
+static int currentTtySource = 0;
 
 #define COMMAND_SCAN_RESTART        0xA0
 #define COMMAND_SCAN_RAPID          0xA1
@@ -71,7 +70,7 @@ int main(int argc, char *argv[]) {
     Logger::Instance()->init();
     Logger::Instance()->log("Starting up");
 
-    if (!InitSEMCapture(&capture, DATA_FILE, &termios)) {
+    if (!InitSEMCapture(&capture, ttySources[currentTtySource], &termios)) {
         Logger::Instance()->log("Unable to init the SEM capture.");
     }
     capture.shouldCapture = true;
@@ -209,7 +208,8 @@ void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, termios &termios, GL
             }
             ImGui::Dummy(ImVec2(0.0f, 4.0f));
             ImGui::Text(capture.status == STATUS_RUNNING ? "Status:\t\tRunning": "Status:\t\tNo Data");
-            ImGui::Text("Device:\t\t%s", DATA_FILE);
+            ImGui::Text("Device:\t\t%s", ttySources[currentTtySource]);
+            ImGui::Combo("", &currentTtySource, ttySources, IM_ARRAYSIZE(ttySources));
 
             ImGui::Dummy(ImVec2(0.0f, 4.0f));
             ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), "Last Row");
@@ -230,7 +230,7 @@ void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, termios &termios, GL
             capture.bufferReadyForWrite = true;
             bufferLock.unlock();
             captureThread.join();
-            InitSEMCapture(&capture, DATA_FILE, &termios);
+            InitSEMCapture(&capture, ttySources[currentTtySource], &termios);
             capture.shouldCapture = true;
             captureThread = std::thread(GrabBytes, std::ref(bytesRead), std::ref(capture), std::ref(bufferLock));
         }
@@ -369,10 +369,16 @@ bool InitSEMCapture(SEMCapture *ci, const char *dataFilePath, struct termios *te
     ci->dataBuffer = static_cast<uint16_t *>(malloc(ci->BUF_SIZEOF_BYTES));
     memset(ci->dataBuffer, 0xFF, ci->BUF_SIZEOF_BYTES);
 
-    ci->datafile = open(dataFilePath, FILE_ACCESS_MODE, 0);
+    if (currentTtySource == 0) {
+        ci->datafile = open(dataFilePath, O_RDONLY, 0);
+    } else {
+        ci->datafile = open(dataFilePath, O_RDWR, 0);
+    }
     if (ci->datafile == -1) {
         Logger::Instance()->log("Unable to open file %s!", dataFilePath);
         succ = false;
+    } else {
+        tcflush(ci->datafile, TCIOFLUSH);
     }
 
     tcgetattr(ci->datafile, termios);
