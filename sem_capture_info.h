@@ -17,8 +17,8 @@ struct SEMCapture {
     const uint16_t BUF_SIZE_SAMPLES = 1024;
     const uint16_t BUF_SIZEOF_BYTES = sizeof(uint16_t) * BUF_SIZE_SAMPLES;
     int datafile = 0;
-    uint16_t sourceWidth = 2048; // must be divisible by 4
-    uint16_t sourceHeight = 2048;
+    uint16_t sourceWidth = 4096; // must be divisible by 4
+    uint16_t sourceHeight = 4096;
     double syncDuration = 0;
     double frameDuration = 0;
     uint8_t scanMode = 0;

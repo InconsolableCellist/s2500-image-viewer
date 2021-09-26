@@ -19,7 +19,7 @@
 // Data source 0 should always be cached data and will be opened in read-only mode.
 // The others should be devices and will be opened in RW mode
 const char *ttySources[] = { "../data.dat", "/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyACM2", "/dev/ttyACM3", "/dev/ttyACM4" };
-static int currentTtySource = 0;
+static int currentTtySource = 1;
 
 #define COMMAND_SCAN_RESTART        0xA0
 #define COMMAND_SCAN_RAPID          0xA1
