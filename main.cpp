@@ -19,7 +19,7 @@
 // Data source 0 should always be cached data and will be opened in read-only mode.
 // The others should be devices and will be opened in RW mode
 const char *ttySources[] = { "../data.dat", "/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyACM2", "/dev/ttyACM3", "/dev/ttyACM4" };
-static int currentTtySource = 1;
+static int currentTtySource = 2;
 
 #define COMMAND_SCAN_RESTART        0xA0
 #define COMMAND_SCAN_RAPID          0xA1
@@ -28,7 +28,6 @@ static int currentTtySource = 1;
 #define COMMAND_SCAN_34             0xA4
 #define COMMAND_SCAN_34_SLOWER      0xA5
 #define COMMAND_SCAN_PHOTO          0xA6
-#define COMMAND_SCAN_PHOTO_SLOWEST  0xA8
 #define COMMAND_HEARTBEAT           0xA7
 
 int windowWidth = 1140;
@@ -46,7 +45,7 @@ void DeleteSEMCapture(SEMCapture *ci);
 void ParseSEMCaptureData(SEMCapture *ci, SEMCapturePixels *p, ssize_t bytesRead);
 void ParseStatusBytes(SEMCapture *ci, SEMCapturePixels *p, uint16_t &i);
 void SendCommand(uint8_t command, const SEMCapture &capture);
-void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, termios &termios, GLuint glTexture,
+void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, SEMCapturePixels &capturePixels, termios &termios, GLuint glTexture,
     std::thread &captureThread, std::mutex &bufferLock, ssize_t &bytesRead, bool &logWindowOpen);
 void SetupGLAndImgui(SDL_Window *window, SDL_GLContext glContext, SEMCapturePixels &capturePixels, SEMCapture &capture,
                      GLuint &glTexture);
@@ -115,7 +114,7 @@ int main(int argc, char *argv[]) {
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL2_NewFrame(window);
-        ImGuiFrame(statusTimer, capture, termios, glTexture, captureThread, bufferLock, bytesRead, logWindowOpen);
+        ImGuiFrame(statusTimer, capture, capturePixels, termios, glTexture, captureThread, bufferLock, bytesRead, logWindowOpen);
 
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -155,7 +154,7 @@ void SetupGLAndImgui(SDL_Window *window, SDL_GLContext glContext, SEMCapturePixe
     glClearColor(background.x, background.y, background.z, background.w);
 }
 
-void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, termios &termios, GLuint glTexture,
+void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, SEMCapturePixels &capturePixels, termios &termios, GLuint glTexture,
     std::thread &captureThread, std::mutex &bufferLock, ssize_t &bytesRead, bool &logWindowOpen) {
     ImGui::NewFrame();
     {
@@ -181,7 +180,6 @@ void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, termios &termios, GL
             if (ImGui::Button("Scan 3/4")) { SendCommand(COMMAND_SCAN_34, capture); }
             if (ImGui::Button("Scan 3/4 Slower")) { SendCommand(COMMAND_SCAN_34_SLOWER, capture); }
             if (ImGui::Button("Scan Photo")) { SendCommand(COMMAND_SCAN_PHOTO, capture); }
-            if (ImGui::Button("Scan Photo Slowest")) { SendCommand(COMMAND_SCAN_PHOTO_SLOWEST, capture); }
         ImGui::Unindent();
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
         ImGui::Text("Capture");
@@ -233,6 +231,10 @@ void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, termios &termios, GL
             InitSEMCapture(&capture, ttySources[currentTtySource], &termios);
             capture.shouldCapture = true;
             captureThread = std::thread(GrabBytes, std::ref(bytesRead), std::ref(capture), std::ref(bufferLock));
+        }
+        if (ImGui::Button("Reset min/max")) {
+            capturePixels.min = MAX_ADC_VAL;
+            capturePixels.max = 0;
         }
         ImGui::Checkbox("Show log window", &logWindowOpen);
         ImGui::End();
