@@ -4,3 +4,5 @@ An OpenGL and Dear Imgui based control program for the [S-2500 STM32F7 digital i
 
 ![screenshot](screenshot.png)
 
+![screenshot2](screenshot2.jpg)
+
