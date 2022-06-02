@@ -93,7 +93,7 @@ int main(int argc, char *argv[]) {
             HandleEvent(&event, &shouldQuit);
         }
 
-        if (!capture.bufferReadyForWrite && bufferLock.try_lock()) {
+        if (!capture.bufferReadyForWrite) {
             if (bytesRead <= 0) {
                 capture.status = CaptureStatus::STATUS_PAUSED;
 //                Logger::Instance()->log("End of data or error. Status: %d. Total read: %d. Errno: %d", bytesRead, totalBytesRead, errno);
@@ -106,7 +106,6 @@ int main(int argc, char *argv[]) {
                 ParseSEMCaptureData(&capture, &capturePixels, bytesRead);
             }
             capture.bufferReadyForWrite = true;
-            bufferLock.unlock();
         }
 
         // TODO: render only a region
@@ -216,6 +215,7 @@ void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, SEMCapturePixels &ca
             ImGui::Text("Row Time(s):\t%f", capture.frameDuration);
             ImGui::Text("MB received:\t%f", capture.bytesRead/1e6);
             ImGui::Text("Row overhead (µs):\t%d", capture.lastRowDurationMicroseconds);
+            ImGui::Text("Read overhead (µs):\t%d", capture.lastReadDurationMicroseconds);
             ImGui::Dummy(ImVec2(0.0f, 1.0f));
             ImGui::Dummy(ImVec2(0.0f, 1.0f));
             ImGui::Text("FPS avg: %.2f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate,
@@ -369,8 +369,11 @@ void setupTexture(GLuint *glTexture, uint8_t *pixels, SEMCapture *capture) {
  */
 bool InitSEMCapture(SEMCapture *ci, const char *dataFilePath, struct termios *termios) {
     bool succ = true;
-    ci->dataBuffer = static_cast<uint16_t *>(malloc(ci->BUF_SIZEOF_BYTES));
-    memset(ci->dataBuffer, 0xFF, ci->BUF_SIZEOF_BYTES);
+    ci->bufA = static_cast<uint16_t *>(malloc(ci->BUF_SIZEOF_BYTES));
+    ci->bufB = static_cast<uint16_t *>(malloc(ci->BUF_SIZEOF_BYTES));
+    memset(ci->bufA, 0xFF, ci->BUF_SIZEOF_BYTES);
+    memset(ci->bufB, 0xFF, ci->BUF_SIZEOF_BYTES);
+    ci->incomingBuf = ci->bufA;
 
     if (currentTtySource == 0) {
         ci->datafile = open(dataFilePath, O_RDONLY, 0);
@@ -394,14 +397,20 @@ bool InitSEMCapture(SEMCapture *ci, const char *dataFilePath, struct termios *te
 }
 
 void DeleteSEMCapture(SEMCapture *ci) {
-    free(ci->dataBuffer);
+    free(ci->bufA);
+    free(ci->bufB);
     if (ci->datafile != -1) {
         close(ci->datafile);
     }
 }
 
 void ParseSEMCaptureData(SEMCapture *ci, SEMCapturePixels *p, ssize_t bytesRead) {
-    uint16_t *buf = ci->dataBuffer;
+    uint16_t *buf;
+    if (ci->incomingBuf == ci->bufA) {
+        buf = ci->bufB;
+    } else {
+        buf = ci->bufA;
+    }
     double pixelIntensity = 0;
     uint32_t val;
     uint32_t loc;
@@ -462,7 +471,12 @@ void ParseSEMCaptureData(SEMCapture *ci, SEMCapturePixels *p, ssize_t bytesRead)
  * @param i Reference to the iterator over the ci->dataBuffer. Will be incremented
  */
 void ParseStatusBytes(SEMCapture *ci, SEMCapturePixels *p, uint16_t &i) {
-    uint16_t *buf = ci->dataBuffer;
+    uint16_t *buf;
+    if (ci->incomingBuf == ci->bufA) {
+        buf = ci->bufB;
+    } else {
+        buf = ci->bufA;
+    }
     if (buf[i] == 0xFEFB) {
 //        Logger::Instance()->log("New frame");
         ci->newFrame = 1;
@@ -508,11 +522,17 @@ void ParseStatusBytes(SEMCapture *ci, SEMCapturePixels *p, uint16_t &i) {
 
 void GrabBytes(ssize_t &bytesRead, SEMCapture &ci, std::mutex &bufferLock) {
     while (ci.shouldCapture) {
+        auto _start = std::chrono::high_resolution_clock::now();
         if (ci.bufferReadyForWrite) {
-            bufferLock.lock();
             ci.bufferReadyForWrite = false;
-            bytesRead = read(ci.datafile, ci.dataBuffer, ci.BUF_SIZEOF_BYTES);
-            bufferLock.unlock();
+            bytesRead = read(ci.datafile, ci.incomingBuf, ci.BUF_SIZEOF_BYTES);
+            if (ci.incomingBuf == ci.bufA) {
+                ci.incomingBuf = ci.bufB;
+            } else {
+                ci.incomingBuf = ci.bufA;
+            }
         }
+        auto _stop = std::chrono::high_resolution_clock::now();
+        ci.lastReadDurationMicroseconds = std::chrono::duration_cast<std::chrono::microseconds>(_stop - _start).count();
     }
 }

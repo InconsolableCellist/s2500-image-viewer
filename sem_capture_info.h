@@ -13,9 +13,12 @@ enum CaptureStatus {
 };
 
 struct SEMCapture {
-    uint16_t *dataBuffer = nullptr;
+    uint16_t *bufA = nullptr;
+    uint16_t *bufB = nullptr;
+    uint16_t *incomingBuf = nullptr;
 //    const uint16_t BUF_SIZE_SAMPLES = 1024;
     const uint16_t BUF_SIZE_SAMPLES = 8192;
+//    const uint16_t BUF_SIZE_SAMPLES = 48;
     const uint16_t BUF_SIZEOF_BYTES = sizeof(uint16_t) * BUF_SIZE_SAMPLES;
     int datafile = 0;
     uint16_t sourceWidth = 4096; // must be divisible by 4
@@ -34,6 +37,7 @@ struct SEMCapture {
     bool shouldCapture = false;
     bool bufferReadyForWrite = true;
     double lastRowDurationMicroseconds = -1;
+    double lastReadDurationMicroseconds = -1;
 };
 
 #endif //S2500_IMAGE_VIEWER_SEM_CAPTURE_INFO_H
