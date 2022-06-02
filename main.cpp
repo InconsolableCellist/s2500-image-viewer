@@ -19,7 +19,7 @@
 // Data source 0 should always be cached data and will be opened in read-only mode.
 // The others should be devices and will be opened in RW mode
 const char *ttySources[] = { "../data.dat", "/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyACM2", "/dev/ttyACM3", "/dev/ttyACM4" };
-static int currentTtySource = 2;
+static int currentTtySource = 0;
 
 #define COMMAND_SCAN_RESTART        0xA0
 #define COMMAND_SCAN_RAPID          0xA1
@@ -215,6 +215,7 @@ void ImGuiFrame(uint32_t &statusTimer, SEMCapture &capture, SEMCapturePixels &ca
             ImGui::Text("Pulse Time (s): %f", capture.syncDuration);
             ImGui::Text("Row Time(s):\t%f", capture.frameDuration);
             ImGui::Text("MB received:\t%f", capture.bytesRead/1e6);
+            ImGui::Text("Row overhead (µs):\t%d", capture.lastRowDurationMicroseconds);
             ImGui::Dummy(ImVec2(0.0f, 1.0f));
             ImGui::Dummy(ImVec2(0.0f, 1.0f));
             ImGui::Text("FPS avg: %.2f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate,
@@ -405,6 +406,7 @@ void ParseSEMCaptureData(SEMCapture *ci, SEMCapturePixels *p, ssize_t bytesRead)
     uint32_t val;
     uint32_t loc;
 
+    auto _rowTimeStart = std::chrono::high_resolution_clock::now();
     for (uint16_t i=0; i<(bytesRead/sizeof(uint16_t)); i++) {
         while (buf[i] == 0xFEFA || buf[i] == 0xFEFB || buf[i] == 0xFEFC) {
             ParseStatusBytes(ci, p, i);
@@ -448,6 +450,8 @@ void ParseSEMCaptureData(SEMCapture *ci, SEMCapturePixels *p, ssize_t bytesRead)
         }
         p->x += 1;
     }
+    auto _rowTimeStop = std::chrono::high_resolution_clock::now();
+    ci->lastRowDurationMicroseconds = std::chrono::duration_cast<std::chrono::microseconds>(_rowTimeStop - _rowTimeStart).count();
 }
 
 /**
